@@ -40,6 +40,8 @@ UNKNOWN, LIVING, NONE = 0, 254, 255
 # POI kinds (must match the app)
 LEVEL_CROSSING, ZEBRA, ROUNDABOUT, CHILDREN, ANIMALS, CURVE, DANGER, STOP = 1, 2, 3, 4, 5, 6, 7, 8
 
+RAIL = {"rail", "narrow_gauge", "light_rail", "preserved"}
+
 # Implicit limits per country code (km/h; mph flagged separately)
 IMPLICIT = {
     "urban": 50, "rural": 100, "motorway": NONE, "living_street": LIVING, "walk": LIVING,
@@ -141,6 +143,9 @@ class Builder:
         self.roads = defaultdict(bytearray)
         self.pois = defaultdict(bytearray)
         self.round_seen = set()
+        # level crossings only count on real railway lines (trams cross roads everywhere in cities)
+        self.rail_nodes = set()
+        self.pending_crossings = []
         self.n_roads = self.n_pois = 0
 
     @staticmethod
@@ -209,16 +214,25 @@ class Builder:
         g = f.get("geometry") or {}
         tags = f.get("properties") or {}
         t = g.get("type")
-        if t == "LineString":
+        if t == "LineString" and tags.get("railway") in RAIL and not tags.get("highway"):
+            for lon, lat in g["coordinates"]:
+                self.rail_nodes.add((e6(lat), e6(lon)))
+        elif t == "LineString":
             if len(g["coordinates"]) >= 2:
                 self.add_way(g["coordinates"], tags)
         elif t == "Point":
             k = poi_kind(tags)
-            if k:
+            if k == LEVEL_CROSSING:
+                lon, lat = g["coordinates"]
+                self.pending_crossings.append((lat, lon))
+            elif k:
                 lon, lat = g["coordinates"]
                 self.add_poi(lat, lon, k)
 
     def write(self, out):
+        for lat, lon in self.pending_crossings:
+            if (e6(lat), e6(lon)) in self.rail_nodes:
+                self.add_poi(lat, lon, LEVEL_CROSSING)
         cells = set(self.roads) | set(self.pois)
         if not cells:
             raise SystemExit("no data")
