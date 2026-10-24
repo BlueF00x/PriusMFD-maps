@@ -1,0 +1,95 @@
+name: Build map data
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated region ids (empty = all)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 3 2 * *"   # monthly
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: m
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          regions = json.load(open("tools/regions.json"))
+          only = [s.strip() for s in os.environ.get("ONLY", "").split(",") if s.strip()]
+          if only:
+              regions = [r for r in regions if r["id"] in only]
+          print("matrix=" + json.dumps(regions))
+          PY
+        env:
+          ONLY: ${{ github.event.inputs.only }}
+      - name: Make sure the release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view mapdata -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create mapdata -R "$GITHUB_REPOSITORY" --title "Map data" \
+              --notes "Speed limits and road signs for PriusMFD, built from OpenStreetMap. © OpenStreetMap contributors, ODbL 1.0."
+
+  build:
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        region: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+      - name: Download ${{ matrix.region.name }}
+        run: curl -sSfL --retry 3 -o in.osm.pbf "https://download.geofabrik.de/${{ matrix.region.path }}-latest.osm.pbf"
+      - name: Convert
+        run: |
+          set -euo pipefail
+          osmium tags-filter in.osm.pbf \
+            w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link,tertiary,tertiary_link,unclassified,residential,living_street,service,road \
+            n/railway=level_crossing n/highway=crossing,stop n/hazard n/traffic_sign \
+            -o filtered.osm.pbf
+          rm in.osm.pbf
+          osmium export filtered.osm.pbf -f geojsonseq -c tools/export-config.json --geometry-types=point,linestring -o - \
+            | python3 tools/build_region.py "${{ matrix.region.id }}.pmd" > stats.json
+          gzip -9 "${{ matrix.region.id }}.pmd"
+          python3 - <<'PY'
+          import json, os, time
+          r = json.loads('''${{ toJSON(matrix.region) }}''')
+          st = json.load(open("stats.json"))
+          f = r["id"] + ".pmd.gz"
+          meta = {"id": r["id"], "name": r["name"], "country": r["country"], "file": f,
+                  "size": os.path.getsize(f), "bbox": st["bbox"], "roads": st["roads"], "pois": st["pois"],
+                  "built": time.strftime("%Y-%m-%d")}
+          json.dump(meta, open(r["id"] + ".meta.json", "w"))
+          print(meta)
+          PY
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload mapdata -R "$GITHUB_REPOSITORY" --clobber "${{ matrix.region.id }}.pmd.gz" "${{ matrix.region.id }}.meta.json"
+
+  index:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write regions.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir m && cd m
+          gh release download mapdata -R "$GITHUB_REPOSITORY" -p "*.meta.json"
+          python3 -c "import json,glob; json.dump(sorted([json.load(open(f)) for f in glob.glob('*.meta.json')], key=lambda r: r['id']), open('../regions.json','w'), ensure_ascii=False, indent=1)"
+          cd .. && gh release upload mapdata -R "$GITHUB_REPOSITORY" --clobber regions.json
