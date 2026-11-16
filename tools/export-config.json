@@ -4,5 +4,5 @@
   "area_tags": false,
   "include_tags": ["highway", "maxspeed", "maxspeed:forward", "maxspeed:backward", "maxspeed:type", "source:maxspeed",
     "zone:maxspeed", "zone:traffic", "oneway", "junction", "railway", "hazard", "traffic_sign",
-    "crossing", "crossing_ref", "crossing:markings"]
+    "crossing", "crossing_ref", "crossing:markings", "amenity"]
 }

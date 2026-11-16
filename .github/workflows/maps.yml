@@ -59,7 +59,7 @@ jobs:
           osmium tags-filter in.osm.pbf \
             w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link,tertiary,tertiary_link,unclassified,residential,living_street,service,road \
             w/railway=rail,narrow_gauge,light_rail,preserved \
-            n/railway=level_crossing n/highway=crossing,stop n/hazard n/traffic_sign \
+            n/railway=level_crossing n/highway=crossing,stop n/hazard n/traffic_sign nw/amenity=fuel \
             -o filtered.osm.pbf
           rm in.osm.pbf
           osmium export filtered.osm.pbf -f geojsonseq -c tools/export-config.json --geometry-types=point,linestring -o - \

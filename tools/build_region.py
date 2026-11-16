@@ -39,6 +39,7 @@ UNKNOWN, LIVING, NONE = 0, 254, 255
 
 # POI kinds (must match the app)
 LEVEL_CROSSING, ZEBRA, ROUNDABOUT, CHILDREN, ANIMALS, CURVE, DANGER, STOP = 1, 2, 3, 4, 5, 6, 7, 8
+FUEL = 9  # petrol station (not a warning: lets the app know "I'm at a station" without asking the internet)
 
 RAIL = {"rail", "narrow_gauge", "light_rail", "preserved"}
 
@@ -143,6 +144,7 @@ class Builder:
         self.roads = defaultdict(bytearray)
         self.pois = defaultdict(bytearray)
         self.round_seen = set()
+        self.fuel_seen = set()
         # level crossings only count on real railway lines (trams cross roads everywhere in cities)
         self.rail_nodes = set()
         self.pending_crossings = []
@@ -204,6 +206,13 @@ class Builder:
         self.round_seen.add(key)
         self.add_poi(lat, lon, ROUNDABOUT)
 
+    def add_fuel(self, lat, lon):
+        key = (round(lat * 2000), round(lon * 1400))  # ~55 m: node + area of the same station collapse
+        if key in self.fuel_seen:
+            return
+        self.fuel_seen.add(key)
+        self.add_poi(lat, lon, FUEL)
+
     def add_poi(self, lat, lon, kind):
         la, lo = e6(lat), e6(lon)
         r, c = self.cell_of(la, lo)
@@ -214,6 +223,11 @@ class Builder:
         g = f.get("geometry") or {}
         tags = f.get("properties") or {}
         t = g.get("type")
+        if tags.get("amenity") == "fuel" and not tags.get("highway"):
+            pts = g.get("coordinates") if t == "LineString" else [g.get("coordinates")] if t == "Point" else None
+            if pts:
+                self.add_fuel(sum(p[1] for p in pts) / len(pts), sum(p[0] for p in pts) / len(pts))
+            return
         if t == "LineString" and tags.get("railway") in RAIL and not tags.get("highway"):
             for lon, lat in g["coordinates"]:
                 self.rail_nodes.add((e6(lat), e6(lon)))
