@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@v5
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
       - name: Download ${{ matrix.region.name }}
-        run: curl -sSfL --retry 3 -o in.osm.pbf "https://download.geofabrik.de/${{ matrix.region.path }}-latest.osm.pbf"
+        run: curl -sSfL --retry 6 --retry-all-errors --retry-delay 20 -o in.osm.pbf "https://download.geofabrik.de/${{ matrix.region.path }}-latest.osm.pbf"
       - name: Convert
         run: |
           set -euo pipefail
